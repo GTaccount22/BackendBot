@@ -143,6 +143,10 @@ async function main() {
   io.on("connection", (socket) => {
     console.log("Admin conectado ✅");
 
+    socket.on("joinAdmin", (admin) => {
+      socket.join(admin);
+    });
+
     // Obtener chats según admin
     socket.on("getChats", async (admin) => {
       const { data } = await supabase
