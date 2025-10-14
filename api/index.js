@@ -11,11 +11,11 @@ import fetch from "node-fetch"; // o global fetch si usas Node 18+
 import { createClient } from "@supabase/supabase-js"; // 🆕 agregado
 
 // 📱 Variables de Meta
-const appId = "1819328678695640";
-const appSecret = "bcc233aa02a082c6cbf2177320604740";
-const tempToken = "EAAZA2q3efktgBPiQwSovT04ZBoHiP4Hd6X97gWshhkk1XbfiBFBkxlp1BD7ZC9ZBChZAN4dzZCT0krvnifduXClHpbHm2gGO7pcOrNpii8qnwyYRoG2CUBZBeslRypHF4HQucZBDCrI92EXEU7NRyT7no7ZCT3HMmb92RvLM92MP632denDuJ90FxZBJXHVsGsMs4MDU6hlbjljvG5OJ9r3LUGZBMDx4UCnAX6rwZAUDMRoZD";
-const PHONE_NUMBER_ID = "738896325981718";
-const VERIFY_TOKEN = "12345";
+const appId = process.env.META_APP_ID;
+const appSecret = process.env.META_APP_SECRET;
+const tempToken = process.env.META_TEMP_TOKEN;
+const PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID;
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const API_URL = `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`;
 
 // 🆕 Supabase (usa variables del backend, no de import.meta)
