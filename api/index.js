@@ -185,7 +185,7 @@ async function main() {
         .is("assigned_to", null);
 
       // Emitir al frontend
-      io.emit("nuevoMensaje", { from: to, text, sender: "admin", assigned_to: admin });
+      io.emit("chatAsignado", { from: to, text, sender: "admin", assigned_to: admin });
     });
   });
 
