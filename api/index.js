@@ -8,7 +8,7 @@ import dotenv from "dotenv";
 dotenv.config();
 
 import fetch from "node-fetch"; // o global fetch si usas Node 18+
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "@supabase/supabase-js"; // 🆕 agregado
 
 // 📱 Variables de Meta
 const appId = process.env.META_APP_ID;
@@ -18,7 +18,7 @@ const PHONE_NUMBER_ID = process.env.META_PHONE_NUMBER_ID;
 const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
 const API_URL = `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`;
 
-// Supabase
+// 🆕 Supabase (usa variables del backend, no de import.meta)
 const supabase = createClient(
   process.env.VITE_SUPABASE_URL,
   process.env.VITE_SUPABASE_SERVICE_ROLE
@@ -26,6 +26,7 @@ const supabase = createClient(
 
 async function obtenerTokenLargo() {
   const url = `https://graph.facebook.com/v17.0/oauth/access_token?grant_type=fb_exchange_token&client_id=${appId}&client_secret=${appSecret}&fb_exchange_token=${tempToken}`;
+
   try {
     const response = await fetch(url);
     const data = await response.json();
@@ -39,6 +40,7 @@ async function obtenerTokenLargo() {
 
 async function main() {
   const ACCESS_TOKEN = await obtenerTokenLargo();
+
   if (!ACCESS_TOKEN) {
     console.error("No se pudo obtener el token de WhatsApp Cloud.");
     return;
@@ -47,6 +49,7 @@ async function main() {
   const app = express();
   app.use(bodyParser.json());
 
+  // Crear servidor HTTP + Socket.IO
   const server = createServer(app);
   const io = new Server(server, {
     cors: { origin: "*" },
@@ -61,65 +64,58 @@ async function main() {
 
   // 📩 Webhook para recibir mensajes
   app.post("/webhook", async (req, res) => {
-    try {
-      const entry = req.body.entry?.[0];
-      const changes = entry?.changes?.[0]?.value;
+  try {
+    const entry = req.body.entry?.[0];
+    const changes = entry?.changes?.[0]?.value;
 
-      if (changes?.messages) {
-        const message = changes.messages[0];
-        const from = message.from;
-        const text = message.text?.body || "";
+    if (changes?.messages) {
+      const message = changes.messages[0];
+      const from = message.from;
+      const text = message.text?.body || "";
 
-        console.log("Mensaje recibido:", from, text);
+      // 🔹 Buscar o crear chat
+      let { data: chat } = await supabase
+        .from("chats")
+        .select("*")
+        .eq("wa_id", from)
+        .single();
 
-        // 🔹 Verificar si ya existe chat
-        let { data: chat, error } = await supabase
+      if (!chat) {
+        const { data: newChat } = await supabase
           .from("chats")
-          .select("*")
-          .eq("wa_id", from)
+          .insert([{ wa_id: from }])
+          .select()
           .single();
-
-        if (!chat) {
-          // 🔹 Crear chat nuevo si no existe
-          const { data: newChat } = await supabase
-            .from("chats")
-            .insert([{ wa_id: from }])
-            .select("*")
-            .single();
-          chat = newChat;
-        }
-
-        // 🔹 Guardar mensaje en messages
-        await supabase.from("messages").insert([
-          {
-            wa_id: from,
-            direction: "incoming",
-            message: text,
-            chat_id: chat.id
-          },
-        ]);
-
-        console.log("💾 Mensaje recibido guardado en Supabase");
-
-        // Emitir al frontend
-        io.emit("nuevoMensaje", {
-          from,
-          text,
-          chat_id: chat.id,
-          sender: "user",
-          assigned_to: chat.assigned_to || null,
-        });
-
-        // Responder automáticamente
-        await sendMessage(from, `Hola 👋, Bienvenido a DuoChat, estamos para tu asistencia.`);
+        chat = newChat;
       }
 
-      res.sendStatus(200);
-    } catch (error) {
-      console.error("Error en webhook:", error);
-      res.sendStatus(500);
+      // 🔹 Insertar mensaje
+      await supabase.from("messages").insert([
+        {
+          wa_id: from,
+          direction: "incoming",
+          message: text,
+          chat_id: chat.id
+        },
+      ]);
+
+      // 🔹 Actualizar último mensaje en chats
+      await supabase.from("chats").update({
+        last_message: text,
+        last_timestamp: new Date()
+      }).eq("id", chat.id);
+
+      io.emit("nuevoMensaje", { chat_id: chat.id, from, text, sender: "user" });
+      await sendMessage(from, `Hola 👋, Bienvenido a DuoChat`);
     }
-  });
+
+    res.sendStatus(200);
+  } catch (error) {
+    console.error("Error webhook:", error);
+    res.sendStatus(500);
+  }
+});
+
 
   // 📤 Función para enviar mensaje
   async function sendMessage(to, text) {
@@ -158,50 +154,63 @@ async function main() {
     }
   });
 
-  // 🧠 Socket.IO
+  // 🧠 Manejo de conexión del admin (frontend)
   io.on("connection", (socket) => {
-    console.log("Admin conectado ✅");
+  console.log("Admin conectado ✅");
 
-    socket.on("joinAdmin", (admin) => {
-      socket.join(admin);
-    });
-
-    // Obtener chats según admin
-    socket.on("getChats", async (admin) => {
-      const { data: chats } = await supabase
-        .from("chats")
-        .select("*, messages(*)")
-        .or(`assigned_to.is.null,assigned_to.eq.${admin}`)
-        .order("last_timestamp", { ascending: false });
-
-      socket.emit("chats", chats);
-    });
-
-    // Enviar mensaje admin
-    socket.on("enviarAdmin", async ({ chat_id, text, admin }) => {
-      const { data: chat } = await supabase.from("chats").select("*").eq("id", chat_id).single();
-      if (!chat) return;
-
-      // Guardar mensaje
-      await supabase.from("messages").insert([
-        { wa_id: chat.wa_id, direction: "outgoing", message: text, chat_id: chat.id }
-      ]);
-
-      // Asignar admin si no hay
-      if (!chat.assigned_to) {
-        await supabase.from("chats").update({ assigned_to: admin }).eq("id", chat.id);
-      }
-
-      // Actualizar último mensaje
-      await supabase.from("chats").update({ last_message: text, last_timestamp: new Date() }).eq("id", chat.id);
-
-      // Emitir al frontend
-      io.emit("chatAsignado", { chat_id: chat.id, assigned_to: chat.assigned_to || admin, text, sender: "admin" });
-
-      // Enviar mensaje real por WhatsApp
-      await sendMessage(chat.wa_id, text);
-    });
+  // Unirse a "room" del admin
+  socket.on("joinAdmin", (admin) => {
+    socket.join(admin);
   });
+
+  // Obtener chats según admin
+  socket.on("getChats", async (admin) => {
+    // Traer chats asignados al admin o sin asignar
+    const { data: chats } = await supabase
+      .from("chats")
+      .select("*, messages(*)")
+      .or(`assigned_to.is.null,assigned_to.eq.${admin}`)
+      .order("last_timestamp", { ascending: false });
+
+    socket.emit("chats", chats);
+  });
+
+  // Enviar mensaje desde admin
+  socket.on("enviarAdmin", async ({ chat_id, text, admin }) => {
+    // 🔹 Obtener chat
+    const { data: chat } = await supabase.from("chats").select("*").eq("id", chat_id).single();
+
+    if (!chat) return;
+
+    // 🔹 Insertar mensaje en messages
+    await supabase.from("messages").insert([
+      {
+        wa_id: chat.wa_id,
+        direction: "outgoing",
+        message: text,
+        chat_id: chat.id
+      },
+    ]);
+
+    // 🔹 Asignar admin si no hay
+    if (!chat.assigned_to) {
+      await supabase.from("chats").update({ assigned_to: admin }).eq("id", chat.id);
+    }
+
+    // 🔹 Actualizar último mensaje
+    await supabase.from("chats").update({
+      last_message: text,
+      last_timestamp: new Date()
+    }).eq("id", chat.id);
+
+    // 🔹 Emitir al frontend
+    io.emit("chatAsignado", { chat_id: chat.id, assigned_to: chat.assigned_to || admin, text, sender: "admin" });
+
+    // 🔹 Enviar mensaje real por WhatsApp
+    await sendMessage(chat.wa_id, text);
+  });
+});
+
 
   // 🚀 Iniciar servidor
   server.listen(5000, () => {
