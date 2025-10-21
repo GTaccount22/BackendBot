@@ -148,10 +148,13 @@ async function main() {
 
     // Obtener chats según admin
     socket.on("getChats", async (adminEmail) => {
+
+      const normalizedEmail = adminEmail.toLowerCase().trim();
+
       const { data: chats, error } = await supabase
         .from("chats")
         .select("*, messages(*)")
-        .or(`assigned_to.is.null,assigned_to.eq.${adminEmail}`)
+        .or(`assigned_to.is.null,assigned_to.eq.${normalizedEmail}`)
         .order("last_timestamp", { ascending: false });
 
       if (error) console.error("Error cargando chats:", error);
@@ -178,7 +181,8 @@ async function main() {
 
       // Si no tiene admin asignado → asignarlo
       if (!assignedTo) {
-        assignedTo = adminEmail;
+        assignedTo = adminEmail.toLowerCase().trim();
+        console.log("Asignando chat al admin:", assignedTo)
         await supabase.from("chats").update({ assigned_to: assignedTo }).eq("id", chat.id);
 
         // Emitir a todos los admins que este chat fue asignado
