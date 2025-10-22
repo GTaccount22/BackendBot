@@ -89,7 +89,18 @@ async function main() {
           })
           .eq("id", chat.id);
 
-        io.emit("nuevoMensaje", { chat_id: chat.id, from, text, sender: "user" });
+        if (!chat.assigned_to) {
+          io.emit("nuevoChat", { chat_id: chat.id, from, text });
+        } else {
+          // 👇 Si ya está asignado, mandar solo al admin asignado
+          io.to(chat.assigned_to).emit("nuevoMensaje", {
+            chat_id: chat.id,
+            from,
+            text,
+            sender: "user",
+          });
+        }
+        
         await sendMessage(from, `Hola 👋, Bienvenido a DuoChat`);
       }
 
