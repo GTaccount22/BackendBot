@@ -164,6 +164,7 @@ async function main() {
     // Enviar mensaje desde el admin
     // 🔐 Enviar mensaje desde el admin
     socket.on("enviarAdmin", async ({ chat_id, text, adminEmail }) => {
+      console.log("Admin que envia mensaje:", adminEmail);
       const { data: chat, error } = await supabase
         .from("chats")
         .select("*")
