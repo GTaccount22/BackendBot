@@ -80,6 +80,20 @@ async function main() {
           },
         ]);
 
+        // 🔹 Verificar si es la primera vez que el usuario habla
+        const { count } = await supabase
+          .from("messages")
+          .select("id", { count: "exact", head: true })
+          .eq("chat_id", chat.id);
+
+        if (count === 1) {
+          // Solo si es el primer mensaje
+          await sendMessage(from, `Hola 👋, Bienvenido a DuoChat`);
+          console.log("👋 Enviado mensaje de bienvenida al nuevo usuario:", from);
+        } else {
+          console.log("✅ Usuario recurrente, no se envía saludo:", from);
+        }
+
         // Actualizar último mensaje
         await supabase
           .from("chats")
@@ -99,20 +113,6 @@ async function main() {
             text,
             sender: "user",
           });
-        }
-
-        // 🔹 Verificar si es la primera vez que el usuario habla
-        const { count, error: countError } = await supabase
-          .from("messages")
-          .select("id", { count: "exact", head: true })
-          .eq("chat_id", chat.id);
-
-        if (count === 1) {
-          // Solo si es el primer mensaje
-          await sendMessage(from, `Hola 👋, Bienvenido a DuoChat`);
-          console.log("👋 Enviado mensaje de bienvenida al nuevo usuario:", from);
-        } else {
-          console.log("✅ Usuario recurrente, no se envía saludo:", from);
         }
       }
 
