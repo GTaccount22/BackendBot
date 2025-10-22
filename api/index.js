@@ -182,7 +182,7 @@ async function main() {
 
       // Si no tiene admin asignado → asignarlo
       if (!assignedTo) {
-        assignedTo = adminEmail.toLowerCase().trim();
+        assignedTo = adminEmail;
         console.log("Asignando chat al admin:", assignedTo)
         await supabase.from("chats").update({ assigned_to: assignedTo }).eq("id", chat.id);
 
