@@ -52,9 +52,9 @@ async function main() {
       if (changes?.messages) {
         const message = changes.messages[0];
         const from = message.from;
-        const text = message.text?.body || "";
+        const text = message.text?.body?.trim() || "";
 
-        // Buscar o crear chat
+        // Buscar chat existente
         let { data: chat } = await supabase
           .from("chats")
           .select("*")
@@ -70,51 +70,110 @@ async function main() {
           chat = newChat;
         }
 
-        // Insertar mensaje entrante
-        await supabase.from("messages").insert([
-          {
-            wa_id: from,
-            direction: "incoming",
-            message: text,
-            chat_id: chat.id,
-          },
-        ]);
+        // Buscar o crear cliente
+        let { data: client } = await supabase
+          .from("clients")
+          .select("*")
+          .eq("phone", from)
+          .single();
 
-        // 🔹 Verificar si es la primera vez que el usuario habla
-        const { count } = await supabase
-          .from("messages")
-          .select("id", { count: "exact", head: true })
-          .eq("chat_id", chat.id);
+        if (!client) {
+          // Si aún no tenemos nombre → lo pedimos
+          if (!chat.context || chat.context !== "awaiting_name") {
+            await sendMessage(from, "👋 ¡Hola! Bienvenido a *Peluquería DuoStyle* 💈\nPor favor, dime tu *nombre* para continuar:");
+            await supabase.from("chats").update({ context: "awaiting_name" }).eq("id", chat.id);
+            return res.sendStatus(200);
+          }
 
-        if (count === 1) {
-          // Solo si es el primer mensaje
-          await sendMessage(from, `Hola 👋, Bienvenido a DuoChat`);
-          console.log("👋 Enviado mensaje de bienvenida al nuevo usuario:", from);
-        } else {
-          console.log("✅ Usuario recurrente, no se envía saludo:", from);
+          // Si ya está esperando el nombre → guardar cliente
+          if (chat.context === "awaiting_name") {
+            const name = text;
+            const { data: newClient } = await supabase
+              .from("clients")
+              .insert([{ name, phone: from }])
+              .select()
+              .single();
+
+            client = newClient;
+
+            await supabase
+              .from("chats")
+              .update({ client_id: client.id, context: "showing_services" })
+              .eq("id", chat.id);
+
+            await sendServicesMenu(from);
+            return res.sendStatus(200);
+          }
         }
 
-        // Actualizar último mensaje
-        await supabase
-          .from("chats")
-          .update({
-            last_message: text,
-            last_timestamp: new Date(),
-          })
-          .eq("id", chat.id);
+        // Si ya existe cliente
+        const currentContext = chat.context || "showing_services";
 
-        if (!chat.assigned_to) {
-          io.emit("nuevoChat", { chat_id: chat.id, from, text });
-        } else {
-          // 👇 Si ya está asignado, mandar solo al admin asignado
-          io.to(chat.assigned_to).emit("nuevoMensaje", {
-            chat_id: chat.id,
-            from,
-            text,
-            sender: "user",
-          });
+        // Mostrar servicios
+        if (currentContext === "showing_services") {
+          const { data: services } = await supabase.from("services").select("*");
+
+          const choice = parseInt(text);
+          if (!isNaN(choice) && services[choice - 1]) {
+            const service = services[choice - 1];
+
+            await supabase
+              .from("chats")
+              .update({ context: "awaiting_date", selected_service: service.id })
+              .eq("id", chat.id);
+
+            await sendMessage(
+              from,
+              `🗓️ Excelente elección: *${service.name}*\nPor favor, indícame una fecha y hora en formato: *DD-MM-YYYY HH:MM*`
+            );
+            return res.sendStatus(200);
+          } else {
+            await sendServicesMenu(from);
+            return res.sendStatus(200);
+          }
+        }
+
+        // Si está esperando fecha
+        if (currentContext === "awaiting_date") {
+          const selectedServiceId = chat.selected_service;
+          const [day, month, yearHour] = text.split("-");
+          if (!selectedServiceId) return;
+
+          const parsedDate = new Date(text.replace(/(\d{2})-(\d{2})-(\d{4})/, "$2/$1/$3"));
+
+          // Validar si ya hay reserva
+          const { data: existing } = await supabase
+            .from("bookings")
+            .select("*")
+            .eq("date", parsedDate.toISOString())
+            .eq("service_id", selectedServiceId)
+            .eq("status", "pending");
+
+          if (existing.length > 0) {
+            await sendMessage(from, "⚠️ Lo siento, ese horario ya está reservado. Por favor, elige otra hora.");
+            return res.sendStatus(200);
+          }
+
+          // Crear reserva
+          await supabase.from("bookings").insert([
+            {
+              client_id: client.id,
+              service_id: selectedServiceId,
+              date: parsedDate.toISOString(),
+              status: "pending",
+            },
+          ]);
+
+          await sendMessage(from, "✅ ¡Listo! Tu reserva fue creada con éxito. Nos vemos pronto 💇‍♂️");
+          await supabase
+            .from("chats")
+            .update({ context: null, selected_service: null })
+            .eq("id", chat.id);
+
+          return res.sendStatus(200);
         }
       }
+
 
       res.sendStatus(200);
     } catch (error) {
@@ -224,6 +283,24 @@ async function main() {
     });
 
   });
+
+  async function sendServicesMenu(to) {
+    const { data: services } = await supabase.from("services").select("*");
+    if (!services || services.length === 0) {
+      await sendMessage(to, "💈 En este momento no hay servicios disponibles.");
+      return;
+    }
+
+    let menu = "💇‍♀️ *Nuestros Servicios Disponibles:*\n\n";
+    services.forEach((s, i) => {
+      menu += `${i + 1}. *${s.name}* - $${s.price}\n`;
+      if (s.description) menu += `   ${s.description}\n`;
+    });
+    menu += "\nPor favor, responde con el número del servicio que deseas reservar 👇";
+
+    await sendMessage(to, menu);
+  }
+
 
   // 🚀 Iniciar servidor
   server.listen(5000, () => {
