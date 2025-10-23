@@ -56,6 +56,23 @@ async function main() {
         const from = message.from;
         const text = message.text?.body?.trim() || "";
 
+
+        // Buscar chat existente
+        let { data: chat } = await supabase
+          .from("chats")
+          .select("*")
+          .eq("wa_id", from)
+          .single();
+
+        if (!chat) {
+          const { data: newChat } = await supabase
+            .from("chats")
+            .insert([{ wa_id: from }])
+            .select()
+            .single();
+          chat = newChat;
+        }
+
         // 🔹 Guardar mensaje entrante (cliente) en Supabase
         if (chat) {
           await supabase.from("messages").insert([
@@ -77,23 +94,6 @@ async function main() {
             assigned_to: chat.assigned_to || null,
             hora: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
           });
-        }
-
-
-        // Buscar chat existente
-        let { data: chat } = await supabase
-          .from("chats")
-          .select("*")
-          .eq("wa_id", from)
-          .single();
-
-        if (!chat) {
-          const { data: newChat } = await supabase
-            .from("chats")
-            .insert([{ wa_id: from }])
-            .select()
-            .single();
-          chat = newChat;
         }
 
         // Buscar o crear cliente
