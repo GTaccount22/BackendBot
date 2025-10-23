@@ -5,6 +5,8 @@ import { createServer } from "http";
 import { Server } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
+import { v4 as uuid } from "uuid";
+
 dotenv.config();
 
 import { createClient } from "@supabase/supabase-js";
