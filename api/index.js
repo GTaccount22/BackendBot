@@ -56,6 +56,30 @@ async function main() {
         const from = message.from;
         const text = message.text?.body?.trim() || "";
 
+        // 🔹 Guardar mensaje entrante (cliente) en Supabase
+        if (chat) {
+          await supabase.from("messages").insert([
+            {
+              wa_id: from,
+              direction: "incoming",
+              message: text,
+              chat_id: chat.id,
+            },
+          ]);
+
+          // 🔹 Emitir al frontend/admin
+          io.to("todosAdmins").emit("nuevoMensaje", {
+            id: uuid(),
+            chat_id: chat.id,
+            from: "Cliente",
+            text,
+            sender: "user", // ⚠️ 'cliente' para que el frontend lo muestre a la izquierda
+            assigned_to: chat.assigned_to || null,
+            hora: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+          });
+        }
+
+
         // Buscar chat existente
         let { data: chat } = await supabase
           .from("chats")
@@ -87,21 +111,29 @@ async function main() {
             return res.sendStatus(200);
           } else {
             // Guardar cliente
+            // Guardar cliente
             const name = text.trim();
-            const { data: newClient } = await supabase
+            const { data: newClient, error: clientError } = await supabase
               .from("clients")
               .insert([{ name, phone: from }])
               .select()
               .single();
+
+            if (clientError) {
+              console.error("Error guardando cliente:", clientError);
+              return res.sendStatus(500);
+            }
+
             client = newClient;
 
+            // Actualizar contexto
             await supabase
               .from("chats")
               .update({ client_id: client.id, context: "showing_services" })
               .eq("id", chat.id);
 
+            // Enviar menú de servicios
             await sendServicesMenu(from, chat.id);
-            return res.sendStatus(200);
           }
         }
 
