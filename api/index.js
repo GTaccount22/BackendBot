@@ -78,22 +78,19 @@ async function main() {
           .single();
 
         if (!client) {
-          // Si aún no tenemos nombre → lo pedimos
-          if (!chat.context || chat.context !== "awaiting_name") {
+          if (chat.context !== "awaiting_name") {
+            // Pedir nombre
             await sendMessage(from, "👋 ¡Hola! Bienvenido a *Peluquería DuoStyle* 💈\nPor favor, dime tu *nombre* para continuar:", chat.id);
             await supabase.from("chats").update({ context: "awaiting_name" }).eq("id", chat.id);
             return res.sendStatus(200);
-          }
-
-          // Si ya está esperando el nombre → guardar cliente
-          if (chat.context === "awaiting_name") {
-            const name = text;
+          } else {
+            // Guardar cliente
+            const name = text.trim();
             const { data: newClient } = await supabase
               .from("clients")
               .insert([{ name, phone: from }])
               .select()
               .single();
-
             client = newClient;
 
             await supabase
@@ -105,6 +102,7 @@ async function main() {
             return res.sendStatus(200);
           }
         }
+
 
         // Si ya existe cliente
         const currentContext = chat.context || "showing_services";
@@ -197,18 +195,30 @@ async function main() {
           headers: {
             Authorization: `Bearer ${ACCESS_TOKEN}`,
             "Content-Type": "application/json",
-          },
+          }
         }
       );
 
-      // Emitir al admin si chatId está disponible
+      // 🔹 Guardar mensaje del bot en Supabase
       if (chatId) {
+        await supabase.from("messages").insert([
+          {
+            wa_id: to,
+            direction: "outgoing",
+            message: text,
+            chat_id: chatId
+          }
+        ]);
+
+        // 🔹 Emitir mensaje al admin
         io.to("todosAdmins").emit("nuevoMensaje", {
+          id: uuid(),
           chat_id: chatId,
-          from: "bot",
+          from: "Bot",
           text,
-          sender: "bot",
+          sender: "admin", // ⚠️ importante que sea 'admin' para que el frontend lo muestre a la derecha
           assigned_to: null,
+          hora: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
         });
       }
 
@@ -216,6 +226,7 @@ async function main() {
       console.error("Error enviando mensaje:", error.response?.data || error);
     }
   }
+
 
   // 🔐 Verificación del webhook
   app.get("/webhook", (req, res) => {
