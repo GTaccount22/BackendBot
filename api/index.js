@@ -80,7 +80,7 @@ async function main() {
         if (!client) {
           // Si aún no tenemos nombre → lo pedimos
           if (!chat.context || chat.context !== "awaiting_name") {
-            await sendMessage(from, "👋 ¡Hola! Bienvenido a *Peluquería DuoStyle* 💈\nPor favor, dime tu *nombre* para continuar:");
+            await sendMessage(from, "👋 ¡Hola! Bienvenido a *Peluquería DuoStyle* 💈\nPor favor, dime tu *nombre* para continuar:", chat.id);
             await supabase.from("chats").update({ context: "awaiting_name" }).eq("id", chat.id);
             return res.sendStatus(200);
           }
@@ -101,7 +101,7 @@ async function main() {
               .update({ client_id: client.id, context: "showing_services" })
               .eq("id", chat.id);
 
-            await sendServicesMenu(from);
+            await sendServicesMenu(from, chat.id);
             return res.sendStatus(200);
           }
         }
@@ -124,11 +124,11 @@ async function main() {
 
             await sendMessage(
               from,
-              `🗓️ Excelente elección: *${service.name}*\nPor favor, indícame una fecha y hora en formato: *DD-MM-YYYY HH:MM*`
+              `🗓️ Excelente elección: *${service.name}*\nPor favor, indícame una fecha y hora en formato: *DD-MM-YYYY HH:MM*`, chat.id
             );
             return res.sendStatus(200);
           } else {
-            await sendServicesMenu(from);
+            await sendServicesMenu(from, chat.id);
             return res.sendStatus(200);
           }
         }
@@ -150,7 +150,7 @@ async function main() {
             .eq("status", "pending");
 
           if (existing.length > 0) {
-            await sendMessage(from, "⚠️ Lo siento, ese horario ya está reservado. Por favor, elige otra hora.");
+            await sendMessage(from, "⚠️ Lo siento, ese horario ya está reservado. Por favor, elige otra hora.", chat.id);
             return res.sendStatus(200);
           }
 
@@ -164,7 +164,7 @@ async function main() {
             },
           ]);
 
-          await sendMessage(from, "✅ ¡Listo! Tu reserva fue creada con éxito. Nos vemos pronto 💇‍♂️");
+          await sendMessage(from, "✅ ¡Listo! Tu reserva fue creada con éxito. Nos vemos pronto 💇‍♂️", chat.id);
           await supabase
             .from("chats")
             .update({ context: null, selected_service: null })
@@ -183,7 +183,7 @@ async function main() {
   });
 
   // 📤 Enviar mensaje a WhatsApp
-  async function sendMessage(to, text) {
+  async function sendMessage(to, text, chatId = null) {
     try {
       await axios.post(
         API_URL,
@@ -200,6 +200,18 @@ async function main() {
           },
         }
       );
+
+      // Emitir al admin si chatId está disponible
+      if (chatId) {
+        io.to("todosAdmins").emit("nuevoMensaje", {
+          chat_id: chatId,
+          from: "bot",
+          text,
+          sender: "bot",
+          assigned_to: null,
+        });
+      }
+
     } catch (error) {
       console.error("Error enviando mensaje:", error.response?.data || error);
     }
@@ -225,6 +237,7 @@ async function main() {
 
     socket.on("joinAdmin", (adminEmail) => {
       socket.join(adminEmail);
+      socket.join("todosAdmins");
       console.log(`Admin conectado: ${adminEmail}`);
     });
 
@@ -287,7 +300,7 @@ async function main() {
   async function sendServicesMenu(to) {
     const { data: services } = await supabase.from("services").select("*");
     if (!services || services.length === 0) {
-      await sendMessage(to, "💈 En este momento no hay servicios disponibles.");
+      await sendMessage(to, "💈 En este momento no hay servicios disponibles.", chat.id);
       return;
     }
 
