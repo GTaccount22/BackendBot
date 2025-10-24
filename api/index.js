@@ -169,19 +169,30 @@ async function main() {
 
         // Mostrar servicios
         if (currentContext === "showing_services") {
-          const selectedService = services.find((s) => s.id === parseInt(messageText));
+          // Obtener los servicios desde Supabase
+          const { data: services, error: servicesError } = await supabase.from("services").select("*");
 
-          if (!selectedService) {
-            await sendMessage(from, "⚠️ Por favor, selecciona un número de servicio válido.", chat.id);
+          if (servicesError || !services || services.length === 0) {
+            await sendMessage(from, "💈 En este momento no hay servicios disponibles.", chat.id);
             return res.sendStatus(200);
           }
+
+          // Intentar convertir el mensaje del cliente a número
+          const choice = parseInt(text.trim());
+
+          if (isNaN(choice) || choice < 1 || choice > services.length) {
+            await sendServicesMenu(from, chat.id);
+            return res.sendStatus(200);
+          }
+
+          const selectedService = services[choice - 1];
 
           // Actualizamos el servicio elegido y el contexto
           await supabase
             .from("chats")
             .update({
               selected_service: selectedService.id,
-              context: "awaiting_date", // 👈 IMPORTANTE: nuevo contexto
+              context: "awaiting_date",
             })
             .eq("id", chat.id);
 
@@ -196,6 +207,7 @@ async function main() {
 
           return res.sendStatus(200);
         }
+
 
 
         // Si está esperando fecha
