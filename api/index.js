@@ -194,7 +194,7 @@ async function main() {
 
         // Si está esperando fecha
         if (currentContext === "awaiting_date") {
-          const selectedServiceId = chat.selected_service;
+          const selectedServiceId = updatedChat.selected_service;
 
           // 🔹 Validaciones importantes
           if (!client) {
