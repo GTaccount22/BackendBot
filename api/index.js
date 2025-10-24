@@ -114,6 +114,11 @@ async function main() {
             return res.sendStatus(200);
           }
 
+          console.log("chat.context:", chat.context);
+          console.log("text recibido:", text);
+          console.log("from:", from);
+
+
           // Si ya estaba esperando nombre → validar y guardar
           const name = text.trim();
           if (!name || name.length < 2) {
