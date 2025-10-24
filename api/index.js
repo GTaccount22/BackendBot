@@ -169,7 +169,6 @@ async function main() {
 
         // Mostrar servicios
         if (currentContext === "showing_services") {
-          // Obtener los servicios desde Supabase
           const { data: services, error: servicesError } = await supabase.from("services").select("*");
 
           if (servicesError || !services || services.length === 0) {
@@ -177,7 +176,6 @@ async function main() {
             return res.sendStatus(200);
           }
 
-          // Intentar convertir el mensaje del cliente a número
           const choice = parseInt(text.trim());
 
           if (isNaN(choice) || choice < 1 || choice > services.length) {
@@ -187,7 +185,7 @@ async function main() {
 
           const selectedService = services[choice - 1];
 
-          // Actualizamos el servicio elegido y el contexto
+          // Actualizamos el chat con el servicio y contexto
           await supabase
             .from("chats")
             .update({
@@ -196,7 +194,15 @@ async function main() {
             })
             .eq("id", chat.id);
 
-          // Enviamos el mensaje de confirmación
+          // 🔹 Leer nuevamente el chat actualizado
+          const { data: refreshedChat } = await supabase
+            .from("chats")
+            .select("*")
+            .eq("id", chat.id)
+            .single();
+
+          chat = refreshedChat; // reemplazamos la variable vieja
+
           await sendMessage(
             from,
             `🗓️ Has elegido *${selectedService.name}* por $${selectedService.price}.\n\n` +
@@ -210,13 +216,13 @@ async function main() {
 
 
 
+
         // Si está esperando fecha
         if (currentContext === "awaiting_date") {
-          const selectedServiceId = updatedChat.selected_service;
+          const selectedServiceId = chat.selected_service;
 
-          // Validaciones previas
           if (!client) {
-            await sendMessage(from, "⚠️ Primero necesito tu nombre. Por favor escríbelo.", chat.id);
+            await sendMessage(from, "⚠️ Primero necesito tu nombre.", chat.id);
             await supabase.from("chats").update({ context: "awaiting_name" }).eq("id", chat.id);
             return res.sendStatus(200);
           }
@@ -227,12 +233,11 @@ async function main() {
             return res.sendStatus(200);
           }
 
-          // Validar formato de fecha (DD-MM-YYYY HH:mm)
           const dateRegex = /^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})$/;
-          const match = messageText.match(dateRegex); // ✅ antes era text.match
+          const match = text.match(dateRegex);
 
           if (!match) {
-            await sendMessage(from, "⚠️ Formato inválido. Usa este formato: *DD-MM-YYYY HH:MM* (por ejemplo: 25-10-2025 15:30)", chat.id);
+            await sendMessage(from, "⚠️ Formato inválido. Usa *DD-MM-YYYY HH:MM*", chat.id);
             return res.sendStatus(200);
           }
 
@@ -240,35 +245,28 @@ async function main() {
           const parsedDate = new Date(`${year}-${month}-${day}T${hour}:${minute}:00`);
 
           if (isNaN(parsedDate.getTime())) {
-            await sendMessage(from, "⚠️ La fecha ingresada no es válida. Intenta nuevamente con formato *DD-MM-YYYY HH:MM*.", chat.id);
+            await sendMessage(from, "⚠️ La fecha no es válida. Intenta nuevamente.", chat.id);
             return res.sendStatus(200);
           }
 
-          const now = new Date();
-          if (parsedDate < now) {
-            await sendMessage(from, "⚠️ No puedes reservar en una fecha pasada. Elige una fecha futura.", chat.id);
+          if (parsedDate < new Date()) {
+            await sendMessage(from, "⚠️ No puedes reservar en una fecha pasada.", chat.id);
             return res.sendStatus(200);
           }
 
-          // Verificar si ya existe una reserva en ese horario
-          const { data: existing, error: existingError } = await supabase
+          const { data: existing } = await supabase
             .from("bookings")
             .select("*")
             .eq("date", parsedDate.toISOString())
             .eq("service_id", selectedServiceId)
             .eq("status", "pending");
 
-          if (existingError) {
-            console.error("Error verificando reservas:", existingError);
-          }
-
-          if (existing && existing.length > 0) {
-            await sendMessage(from, "⚠️ Lo siento, ese horario ya está reservado. Por favor, elige otra hora.", chat.id);
+          if (existing.length > 0) {
+            await sendMessage(from, "⚠️ Lo siento, ese horario ya está reservado.", chat.id);
             return res.sendStatus(200);
           }
 
-          // Crear la reserva
-          const { error: bookingError } = await supabase.from("bookings").insert([
+          await supabase.from("bookings").insert([
             {
               client_id: client.id,
               service_id: selectedServiceId,
@@ -277,22 +275,16 @@ async function main() {
             },
           ]);
 
-          if (bookingError) {
-            console.error("Error creando reserva:", bookingError);
-            await sendMessage(from, "❌ Ocurrió un error al crear tu reserva. Inténtalo nuevamente más tarde.", chat.id);
-            return res.sendStatus(500);
-          }
+          await sendMessage(from, "✅ ¡Listo! Tu reserva fue creada con éxito.", chat.id);
 
-          // Actualizar el chat y cerrar flujo
           await supabase
             .from("chats")
             .update({ context: null, selected_service: null })
             .eq("id", chat.id);
 
-          await sendMessage(from, "✅ ¡Listo! Tu reserva fue creada con éxito. Nos vemos pronto 💇‍♂️", chat.id);
-
           return res.sendStatus(200);
         }
+
 
       }
 
