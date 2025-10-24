@@ -162,7 +162,7 @@ async function main() {
         if (currentContext === "showing_services") {
           const { data: services } = await supabase.from("services").select("*");
 
-          const choice = parseInt(text);
+          const choice = parseInt(text.trim());
           if (!isNaN(choice) && services[choice - 1]) {
             const service = services[choice - 1];
 
