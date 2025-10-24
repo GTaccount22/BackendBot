@@ -6,7 +6,7 @@ import { Server } from "socket.io";
 import cors from "cors";
 import dotenv from "dotenv";
 import { v4 as uuid } from "uuid";
-import chrono from "chrono-node";
+import * as chrono from "chrono-node";
 import { isValid, isAfter } from "date-fns";
 
 
