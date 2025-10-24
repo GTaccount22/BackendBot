@@ -209,7 +209,28 @@ async function main() {
             return res.sendStatus(200);
           }
 
-          const parsedDate = new Date(text.replace(/(\d{2})-(\d{2})-(\d{4})/, "$2/$1/$3"));
+          // 🔹 Validar formato de fecha: DD-MM-YYYY HH:mm
+          const dateRegex = /^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})$/;
+          const match = text.match(dateRegex);
+
+          if (!match) {
+            await sendMessage(from, "⚠️ Formato inválido. Usa este formato: *DD-MM-YYYY HH:MM* (por ejemplo: 25-10-2025 15:30)", chat.id);
+            return res.sendStatus(200);
+          }
+
+          const [, day, month, year, hour, minute] = match;
+          const parsedDate = new Date(`${year}-${month}-${day}T${hour}:${minute}:00`);
+
+          if (isNaN(parsedDate.getTime())) {
+            await sendMessage(from, "⚠️ La fecha ingresada no es válida. Intenta nuevamente con formato *DD-MM-YYYY HH:MM*.", chat.id);
+            return res.sendStatus(200);
+          }
+
+          const now = new Date();
+          if (parsedDate < now) {
+            await sendMessage(from, "⚠️ No puedes reservar en una fecha pasada. Elige una fecha futura.", chat.id);
+            return res.sendStatus(200);
+          }
 
           // Validar si ya hay reserva
           const { data: existing } = await supabase
@@ -225,7 +246,7 @@ async function main() {
           }
 
           // Crear reserva
-          await supabase.from("bookings").insert([
+          const { error: bookingError } = await supabase.from("bookings").insert([
             {
               client_id: client.id,
               service_id: selectedServiceId,
@@ -233,6 +254,12 @@ async function main() {
               status: "pending",
             },
           ]);
+
+          if (bookingError) {
+            console.error("Error creando reserva:", bookingError);
+            await sendMessage(from, "❌ Ocurrió un error al crear tu reserva. Inténtalo nuevamente más tarde.", chat.id);
+            return res.sendStatus(500);
+          }
 
           await sendMessage(from, "✅ ¡Listo! Tu reserva fue creada con éxito. Nos vemos pronto 💇‍♂️", chat.id);
           await supabase
