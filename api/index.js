@@ -118,6 +118,15 @@ async function main() {
           console.log("text recibido:", text);
           console.log("from:", from);
 
+          // Si ya estaba esperando nombre → validar y guardar
+          const { data: refreshedChat } = await supabase
+            .from("chats")
+            .select("*")
+            .eq("id", chat.id)
+            .single();
+
+          chat = refreshedChat;
+
 
           // Si ya estaba esperando nombre → validar y guardar
           const name = text.trim();
@@ -258,31 +267,31 @@ async function main() {
             Authorization: `Bearer ${ACCESS_TOKEN}`,
             "Content-Type": "application/json",
           }
-        }
-      );
+        });
 
-      // 🔹 Guardar mensaje del bot en Supabase
-      if (chatId) {
-        await supabase.from("messages").insert([
+      // Aquí guardas el mensaje
+      const { data, error } = await supabase
+        .from("messages")
+        .insert([
           {
             wa_id: to,
             direction: "outgoing",
             message: text,
-            chat_id: chatId
-          }
-        ]);
+            chat_id: chatId,
+          },
+        ])
+        .select();
 
-        // 🔹 Emitir mensaje al admin
-        io.to("todosAdmins").emit("nuevoMensaje", {
-          id: uuid(),
-          chat_id: chatId,
-          from: "Bot",
-          text,
-          sender: "admin",
-          assigned_to: null,
-          hora: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-        });
-      }
+      // ⚠️ AQUÍ AGREGA O CAMBIA ESTO:
+      io.to("todosAdmins").emit("nuevoMensaje", {
+        id: uuid(),
+        chat_id: chatId,
+        from: "Bot",
+        text,
+        sender: "admin",
+        assigned_to: null,
+        hora: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      });
 
     } catch (error) {
       console.error("Error enviando mensaje:", error.response?.data || error);
