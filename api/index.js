@@ -209,10 +209,16 @@ async function main() {
           await sendMessage(
             from,
             `🗓️ Has elegido *${selectedService.name}* por $${selectedService.price}.\n\n` +
-            "Por favor, indica la fecha y hora para tu reserva en formato:\n" +
-            "*DD-MM-YYYY HH:MM* (por ejemplo: 25-10-2025 15:30)",
+            "Por favor, indícanos la *fecha y hora* para tu reserva. Puedes hacerlo de dos formas:\n\n" +
+            "📅 *Formato exacto:* `25-10-2025 15:30`\n" +
+            "🕓 *O también puedes escribirlo de forma natural:* `mañana a las 5 de la tarde`, `sábado a las 11`, etc.\n\n" +
+            "✅ Ejemplos válidos:\n" +
+            "• 26-10-2025 10:00\n" +
+            "• mañana a las 6\n" +
+            "• próximo lunes a las 4 de la tarde",
             chat.id
           );
+
 
           return res.sendStatus(200);
         }
