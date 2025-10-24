@@ -46,254 +46,199 @@ async function main() {
   );
 
   // 📩 Webhook para recibir mensajes desde WhatsApp
-  app.post("/webhook", async (req, res) => {
-    try {
-      const entry = req.body.entry?.[0];
-      const changes = entry?.changes?.[0]?.value;
+  // ...mantenemos las importaciones y setup igual hasta app.post("/webhook")
 
-      if (changes?.messages) {
-        const message = changes.messages[0];
-        const from = message.from;
-        const text = message.text?.body?.trim() || "";
+app.post("/webhook", async (req, res) => {
+  try {
+    const entry = req.body.entry?.[0];
+    const changes = entry?.changes?.[0]?.value;
 
-        // Buscar chat existente
-        let { data: chat } = await supabase
-          .from("chats")
-          .select("*")
-          .eq("wa_id", from)
-          .single();
+    if (!changes?.messages) return res.sendStatus(200);
 
-        if (!chat) {
-          const { data: newChat } = await supabase
-            .from("chats")
-            .insert([{ wa_id: from }])
-            .select()
-            .single();
-          chat = newChat;
-        }
+    const message = changes.messages[0];
+    const from = message.from;
+    const text = message.text?.body?.trim() || "";
 
-        // 🔹 Guardar mensaje entrante (cliente) en Supabase
-        if (chat) {
-          await supabase.from("messages").insert([
-            {
-              wa_id: from,
-              direction: "incoming",
-              message: text,
-              chat_id: chat.id,
-            },
-          ]);
+    // 🔹 Buscar chat
+    let { data: chat } = await supabase
+      .from("chats")
+      .select("*")
+      .eq("wa_id", from)
+      .single();
 
-          // 🔹 Emitir al frontend/admin
-          io.to("todosAdmins").emit("nuevoMensaje", {
-            id: uuid(),
-            chat_id: chat.id,
-            from: "Cliente",
-            text,
-            sender: "user", // ⚠️ 'cliente' para que el frontend lo muestre a la izquierda
-            assigned_to: chat.assigned_to || null,
-            hora: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
-          });
-        }
+    if (!chat) {
+      const { data: newChat } = await supabase
+        .from("chats")
+        .insert([{ wa_id: from }])
+        .select()
+        .single();
+      chat = newChat;
+    }
 
-        // Buscar o crear cliente
-        let { data: client } = await supabase
-          .from("clients")
-          .select("*")
-          .eq("phone", from)
-          .single();
+    // 🔹 Guardar mensaje entrante
+    await supabase.from("messages").insert([{
+      wa_id: from,
+      direction: "incoming",
+      message: text,
+      chat_id: chat.id,
+    }]);
 
-        // 🔹 Si no hay cliente y chat no está en contexto "awaiting_name" → pedir nombre
-        if (!client) {
-          if (chat.context !== "awaiting_name") {
-            await sendMessage(
-              from,
-              "👋 ¡Hola! Bienvenido a *Peluquería DuoStyle* 💈\nPor favor, dime tu *nombre* para continuar:",
-              chat.id
-            );
-            await supabase.from("chats").update({ context: "awaiting_name" }).eq("id", chat.id);
-            return res.sendStatus(200);
-          }
+    io.to("todosAdmins").emit("nuevoMensaje", {
+      id: uuid(),
+      chat_id: chat.id,
+      from: "Cliente",
+      text,
+      sender: "user",
+      assigned_to: chat.assigned_to || null,
+      hora: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+    });
 
-          console.log("chat.context:", chat.context);
-          console.log("text recibido:", text);
-          console.log("from:", from);
+    // 🔹 Buscar cliente
+    let { data: client } = await supabase
+      .from("clients")
+      .select("*")
+      .eq("phone", from)
+      .single();
 
-          // Si ya estaba esperando nombre → validar y guardar
-          const { data: refreshedChat } = await supabase
-            .from("chats")
-            .select("*")
-            .eq("id", chat.id)
-            .single();
-
-          chat = refreshedChat;
-
-
-          // Si ya estaba esperando nombre → validar y guardar
-          const name = text.trim();
-          if (!name || name.length < 2) {
-            await sendMessage(from, "⚠️ Por favor, escribe tu *nombre completo* para continuar.", chat.id);
-            return res.sendStatus(200);
-          }
-
-          const { data: newClient, error: clientError } = await supabase
-            .from("clients")
-            .insert([{ name, phone: from }])
-            .select()
-            .single();
-
-          if (clientError) {
-            console.error("Error guardando cliente:", clientError);
-            return res.sendStatus(500);
-          }
-
-          client = newClient;
-
-          // Actualizar contexto y mostrar servicios
-          await supabase
-            .from("chats")
-            .update({ client_id: client.id, context: "showing_services" })
-            .eq("id", chat.id);
-
-          await sendServicesMenu(from, chat.id);
-          return res.sendStatus(200);
-        }
-
-        // Obtener nuevamente el chat actualizado
-        let { data: updatedChat } = await supabase
-          .from("chats")
-          .select("*")
-          .eq("id", chat.id)
-          .single();
-
-        const currentContext = updatedChat?.context || "showing_services";
-
-        // Mostrar servicios
-        if (currentContext === "showing_services") {
-          const { data: services, error: servicesError } = await supabase.from("services").select("*");
-
-          if (servicesError || !services || services.length === 0) {
-            await sendMessage(from, "💈 En este momento no hay servicios disponibles.", chat.id);
-            return res.sendStatus(200);
-          }
-
-          const choice = parseInt(text.trim());
-
-          if (isNaN(choice) || choice < 1 || choice > services.length) {
-            await sendServicesMenu(from, chat.id);
-            return res.sendStatus(200);
-          }
-
-          const selectedService = services[choice - 1];
-
-          // Actualizamos el chat con el servicio y contexto
-          await supabase
-            .from("chats")
-            .update({
-              selected_service: selectedService.id,
-              context: "awaiting_date",
-            })
-            .eq("id", chat.id);
-
-          // 🔹 Leer nuevamente el chat actualizado
-          const { data: refreshedChat } = await supabase
-            .from("chats")
-            .select("*")
-            .eq("id", chat.id)
-            .single();
-
-          chat = refreshedChat; // reemplazamos la variable vieja
-
-          await sendMessage(
-            from,
-            `🗓️ Has elegido *${selectedService.name}* por $${selectedService.price}.\n\n` +
-            "Por favor, indica la fecha y hora para tu reserva en formato:\n" +
-            "*DD-MM-YYYY HH:MM* (por ejemplo: 25-10-2025 15:30)",
-            chat.id
-          );
-
-          return res.sendStatus(200);
-        }
-
-
-
-
-        // Si está esperando fecha
-        if (currentContext === "awaiting_date") {
-          const selectedServiceId = chat.selected_service;
-
-          if (!client) {
-            await sendMessage(from, "⚠️ Primero necesito tu nombre.", chat.id);
-            await supabase.from("chats").update({ context: "awaiting_name" }).eq("id", chat.id);
-            return res.sendStatus(200);
-          }
-
-          if (!selectedServiceId) {
-            await sendMessage(from, "⚠️ Primero debes elegir un servicio.", chat.id);
-            await supabase.from("chats").update({ context: "showing_services" }).eq("id", chat.id);
-            return res.sendStatus(200);
-          }
-
-          const dateRegex = /^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})$/;
-          const match = text.match(dateRegex);
-
-          if (!match) {
-            await sendMessage(from, "⚠️ Formato inválido. Usa *DD-MM-YYYY HH:MM*", chat.id);
-            return res.sendStatus(200);
-          }
-
-          const [, day, month, year, hour, minute] = match;
-          const parsedDate = new Date(`${year}-${month}-${day}T${hour}:${minute}:00`);
-
-          if (isNaN(parsedDate.getTime())) {
-            await sendMessage(from, "⚠️ La fecha no es válida. Intenta nuevamente.", chat.id);
-            return res.sendStatus(200);
-          }
-
-          if (parsedDate < new Date()) {
-            await sendMessage(from, "⚠️ No puedes reservar en una fecha pasada.", chat.id);
-            return res.sendStatus(200);
-          }
-
-          const { data: existing } = await supabase
-            .from("bookings")
-            .select("*")
-            .eq("date", parsedDate.toISOString())
-            .eq("service_id", selectedServiceId)
-            .eq("status", "pending");
-
-          if (existing.length > 0) {
-            await sendMessage(from, "⚠️ Lo siento, ese horario ya está reservado.", chat.id);
-            return res.sendStatus(200);
-          }
-
-          await supabase.from("bookings").insert([
-            {
-              client_id: client.id,
-              service_id: selectedServiceId,
-              date: parsedDate.toISOString(),
-              status: "pending",
-            },
-          ]);
-
-          await sendMessage(from, "✅ ¡Listo! Tu reserva fue creada con éxito.", chat.id);
-
-          await supabase
-            .from("chats")
-            .update({ context: null, selected_service: null })
-            .eq("id", chat.id);
-
-          return res.sendStatus(200);
-        }
-
-
+    // 🔹 Si no hay cliente → pedir nombre
+    if (!client) {
+      if (chat.context !== "awaiting_name") {
+        await sendMessage(
+          from,
+          "👋 ¡Hola! Bienvenido a *Peluquería DuoStyle* 💈\nPor favor, dime tu *nombre* para continuar:",
+          chat.id
+        );
+        await supabase.from("chats").update({ context: "awaiting_name" }).eq("id", chat.id);
+        return res.sendStatus(200);
       }
 
-      res.sendStatus(200);
-    } catch (error) {
-      console.error("Error webhook:", error);
-      res.sendStatus(500);
+      const name = text.trim();
+      if (!name || name.length < 2) {
+        await sendMessage(from, "⚠️ Por favor, escribe tu *nombre completo* para continuar.", chat.id);
+        return res.sendStatus(200);
+      }
+
+      const { data: newClient, error: clientError } = await supabase
+        .from("clients")
+        .insert([{ name, phone: from }])
+        .select()
+        .single();
+
+      if (clientError) return res.sendStatus(500);
+
+      client = newClient;
+
+      // Actualizamos contexto y mostramos servicios
+      await supabase.from("chats").update({ client_id: client.id, context: "showing_services" }).eq("id", chat.id);
+      chat.context = "showing_services"; // 🔹 Actualizamos variable local
+
+      await sendServicesMenu(from, chat.id);
+      return res.sendStatus(200);
     }
-  });
+
+    // 🔹 Refrescar chat actualizado antes de manejar contexto
+    let { data: updatedChat } = await supabase
+      .from("chats")
+      .select("*")
+      .eq("id", chat.id)
+      .single();
+    chat = updatedChat;
+    const currentContext = chat.context || "showing_services";
+
+    // 🔹 Bloque: mostrando servicios
+    if (currentContext === "showing_services") {
+      const { data: services, error: servicesError } = await supabase.from("services").select("*");
+      if (servicesError || !services || services.length === 0) {
+        await sendMessage(from, "💈 En este momento no hay servicios disponibles.", chat.id);
+        return res.sendStatus(200);
+      }
+
+      const choice = parseInt(text.trim());
+      if (isNaN(choice) || choice < 1 || choice > services.length) {
+        await sendServicesMenu(from, chat.id);
+        return res.sendStatus(200);
+      }
+
+      const selectedService = services[choice - 1];
+
+      // Actualizamos chat con el servicio elegido y contexto
+      await supabase.from("chats").update({
+        selected_service: selectedService.id,
+        context: "awaiting_date"
+      }).eq("id", chat.id);
+
+      // 🔹 Refrescar chat
+      const { data: refreshedChat } = await supabase.from("chats").select("*").eq("id", chat.id).single();
+      chat = refreshedChat;
+
+      await sendMessage(
+        from,
+        `🗓️ Has elegido *${selectedService.name}* por $${selectedService.price}.\n\n` +
+        "Por favor, indica la fecha y hora para tu reserva en formato:\n" +
+        "*DD-MM-YYYY HH:MM* (por ejemplo: 25-10-2025 15:30)",
+        chat.id
+      );
+
+      return res.sendStatus(200);
+    }
+
+    // 🔹 Bloque: esperando fecha
+    if (currentContext === "awaiting_date") {
+      const selectedServiceId = chat.selected_service;
+
+      if (!selectedServiceId) {
+        await sendMessage(from, "⚠️ Primero debes elegir un servicio.", chat.id);
+        await supabase.from("chats").update({ context: "showing_services" }).eq("id", chat.id);
+        return res.sendStatus(200);
+      }
+
+      const dateRegex = /^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})$/;
+      const match = text.match(dateRegex);
+      if (!match) {
+        await sendMessage(from, "⚠️ Formato inválido. Usa *DD-MM-YYYY HH:MM*", chat.id);
+        return res.sendStatus(200);
+      }
+
+      const [, day, month, year, hour, minute] = match;
+      const parsedDate = new Date(`${year}-${month}-${day}T${hour}:${minute}:00`);
+
+      if (isNaN(parsedDate.getTime()) || parsedDate < new Date()) {
+        await sendMessage(from, "⚠️ Fecha inválida o pasada. Intenta otra vez.", chat.id);
+        return res.sendStatus(200);
+      }
+
+      const { data: existing } = await supabase.from("bookings")
+        .select("*")
+        .eq("date", parsedDate.toISOString())
+        .eq("service_id", selectedServiceId)
+        .eq("status", "pending");
+
+      if (existing.length > 0) {
+        await sendMessage(from, "⚠️ Lo siento, ese horario ya está reservado.", chat.id);
+        return res.sendStatus(200);
+      }
+
+      await supabase.from("bookings").insert([{
+        client_id: client.id,
+        service_id: selectedServiceId,
+        date: parsedDate.toISOString(),
+        status: "pending",
+      }]);
+
+      await sendMessage(from, "✅ ¡Listo! Tu reserva fue creada con éxito.", chat.id);
+
+      await supabase.from("chats").update({ context: null, selected_service: null }).eq("id", chat.id);
+      return res.sendStatus(200);
+    }
+
+    res.sendStatus(200);
+
+  } catch (error) {
+    console.error("Error webhook:", error);
+    res.sendStatus(500);
+  }
+});
+
 
   // 📤 Enviar mensaje a WhatsApp
   async function sendMessage(to, text, chatId = null) {
