@@ -236,12 +236,27 @@ async function main() {
             return res.sendStatus(200);
           }
 
-          // --- 1️⃣ Parseo flexible con chrono-node (lenguaje natural) ---
-          let parsedDate = chrono.parseDate(text, new Date(), { forwardDate: true });
+          // 🧠 Traducción simple de español a inglés para que chrono entienda
+          let textToParse = text
+            .replace(/\bmañana\b/gi, "tomorrow")
+            .replace(/\bhoy\b/gi, "today")
+            .replace(/\bsábado\b/gi, "Saturday")
+            .replace(/\bdomingo\b/gi, "Sunday")
+            .replace(/\blunes\b/gi, "Monday")
+            .replace(/\bmartes\b/gi, "Tuesday")
+            .replace(/\bmiércoles\b/gi, "Wednesday")
+            .replace(/\bjueves\b/gi, "Thursday")
+            .replace(/\bviernes\b/gi, "Friday")
+            .replace(/\ba las\b/gi, "at")
+            .replace(/\bde la tarde\b/gi, "pm")
+            .replace(/\bde la mañana\b/gi, "am");
 
-          // Intento alternativo si no entiende la frase
+          // Intentamos parsear con chrono-node
+          let parsedDate = chrono.parseDate(textToParse, new Date());
+
+          // Fallback: si no reconoce, intentamos el formato DD-MM-YYYY HH:MM
           if (!parsedDate) {
-            const dateRegex = /^(\d{2})-(\d{2})-(\d{4})[ T](\d{2}):(\d{2})$/;
+            const dateRegex = /^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})$/;
             const match = text.match(dateRegex);
             if (match) {
               const [, day, month, year, hour, minute] = match;
@@ -249,42 +264,36 @@ async function main() {
             }
           }
 
-          // --- 2️⃣ Validar que sea una fecha válida ---
-          if (!parsedDate || !isValid(parsedDate)) {
+          if (!parsedDate || isNaN(parsedDate.getTime())) {
             await sendMessage(
               from,
               "⚠️ No pude entender la fecha. Puedes escribir algo como:\n" +
-              "👉 'mañana a las 5 de la tarde'\n" +
-              "👉 'sábado a las 11'\n" +
-              "👉 '25-10-2025 15:30'",
+              "👉 *mañana a las 5 de la tarde*\n" +
+              "👉 *sábado a las 11*\n" +
+              "👉 *25-10-2025 15:30*",
               chat.id
             );
             return res.sendStatus(200);
           }
 
-          // --- 3️⃣ Validar que sea una fecha futura ---
-          const now = new Date();
-          if (!isAfter(parsedDate, now)) {
-            await sendMessage(from, "⚠️ La fecha debe ser futura. Intenta nuevamente.", chat.id);
-            return res.sendStatus(200);
-          }
-
-          // --- 4️⃣ Validar horario laboral (10:00 a 18:00) ---
-          const WORK_START = 10;
-          const WORK_END = 18;
+          // ⏰ Validar rango horario (10:00 a 18:00)
           const hour = parsedDate.getHours();
-
-          if (hour < WORK_START || hour >= WORK_END) {
+          if (hour < 10 || hour >= 18) {
             await sendMessage(
               from,
-              `⚠️ Nuestro horario es de ${WORK_START}:00 a ${WORK_END}:00.\n` +
-              "Por favor elige una hora dentro de ese rango.",
+              "⏰ Nuestro horario de atención es de *10:00 a 18:00*.\nPor favor elige una hora dentro de ese rango.",
               chat.id
             );
             return res.sendStatus(200);
           }
 
-          // --- 5️⃣ Validar disponibilidad ---
+          // 🕒 Validar que no sea fecha pasada
+          if (parsedDate < new Date()) {
+            await sendMessage(from, "⚠️ No puedes reservar en una fecha pasada.", chat.id);
+            return res.sendStatus(200);
+          }
+
+          // 🧾 Validar disponibilidad
           const { data: existing } = await supabase
             .from("bookings")
             .select("*")
@@ -293,12 +302,12 @@ async function main() {
             .eq("status", "pending");
 
           if (existing && existing.length > 0) {
-            await sendMessage(from, "⚠️ Ese horario ya está reservado. Prueba con otro.", chat.id);
+            await sendMessage(from, "⚠️ Lo siento, ese horario ya está reservado.", chat.id);
             return res.sendStatus(200);
           }
 
-          // --- 6️⃣ Crear la reserva ---
-          const { error: bookingError } = await supabase.from("bookings").insert([
+          // ✅ Crear reserva
+          await supabase.from("bookings").insert([
             {
               client_id: client.id,
               service_id: selectedServiceId,
@@ -307,16 +316,9 @@ async function main() {
             },
           ]);
 
-          if (bookingError) {
-            console.error("Error creando reserva:", bookingError);
-            await sendMessage(from, "❌ Hubo un error al crear la reserva. Intenta más tarde.", chat.id);
-            return res.sendStatus(500);
-          }
-
-          // --- 7️⃣ Confirmar ---
-          const fechaBonita = parsedDate.toLocaleString("es-CL", {
+          const formattedDate = parsedDate.toLocaleString("es-CL", {
             weekday: "long",
-            day: "numeric",
+            day: "2-digit",
             month: "long",
             hour: "2-digit",
             minute: "2-digit",
@@ -324,17 +326,17 @@ async function main() {
 
           await sendMessage(
             from,
-            `✅ ¡Reserva confirmada!\n📅 *${fechaBonita}*\nTe esperamos en *Peluquería DuoStyle*.`,
+            `✅ ¡Reserva confirmada!\n📅 ${formattedDate}\nTe esperamos en *Peluquería DuoStyle*.`,
             chat.id
           );
 
-          // --- 8️⃣ Limpiar contexto ---
-          await supabase.from("chats").update({ context: null, selected_service: null }).eq("id", chat.id);
+          await supabase
+            .from("chats")
+            .update({ context: null, selected_service: null })
+            .eq("id", chat.id);
 
           return res.sendStatus(200);
         }
-
-
 
       }
 
