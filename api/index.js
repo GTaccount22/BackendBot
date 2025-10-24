@@ -236,34 +236,63 @@ async function main() {
             return res.sendStatus(200);
           }
 
-          // 🧠 Traducción simple de español a inglés para que chrono entienda
-          let textToParse = text
-            .replace(/\bmañana\b/gi, "tomorrow")
-            .replace(/\bhoy\b/gi, "today")
-            .replace(/\bsábado\b/gi, "Saturday")
-            .replace(/\bdomingo\b/gi, "Sunday")
-            .replace(/\blunes\b/gi, "Monday")
-            .replace(/\bmartes\b/gi, "Tuesday")
-            .replace(/\bmiércoles\b/gi, "Wednesday")
-            .replace(/\bjueves\b/gi, "Thursday")
-            .replace(/\bviernes\b/gi, "Friday")
-            .replace(/\ba las\b/gi, "at")
-            .replace(/\bde la tarde\b/gi, "pm")
-            .replace(/\bde la mañana\b/gi, "am");
+          const textLower = text.toLowerCase().trim();
+          let parsedDate = null;
+          const now = new Date();
 
-          // Intentamos parsear con chrono-node
-          let parsedDate = chrono.parseDate(textToParse, new Date());
+          // 🔹 1. Si el usuario escribe "mañana a las 5" o similar
+          const mañanaMatch = textLower.match(/mañana(?: a las)? (\d{1,2})(?::(\d{2}))?(?:\s*(am|pm|de la tarde|de la mañana))?/);
+          if (mañanaMatch) {
+            let [, hour, minute, meridian] = mañanaMatch;
+            hour = parseInt(hour);
+            minute = minute ? parseInt(minute) : 0;
 
-          // Fallback: si no reconoce, intentamos el formato DD-MM-YYYY HH:MM
-          if (!parsedDate) {
-            const dateRegex = /^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2})$/;
-            const match = text.match(dateRegex);
-            if (match) {
-              const [, day, month, year, hour, minute] = match;
-              parsedDate = new Date(`${year}-${month}-${day}T${hour}:${minute}:00`);
-            }
+            if (meridian?.includes("tarde") || meridian?.includes("pm")) hour += 12;
+            if (meridian?.includes("mañana") && hour === 12) hour = 0;
+
+            parsedDate = new Date(now);
+            parsedDate.setDate(now.getDate() + 1);
+            parsedDate.setHours(hour, minute, 0, 0);
           }
 
+          // 🔹 2. Si escribe "sábado a las 11", "martes a las 15", etc.
+          const dias = {
+            domingo: 0,
+            lunes: 1,
+            martes: 2,
+            miércoles: 3,
+            miercoles: 3,
+            jueves: 4,
+            viernes: 5,
+            sábado: 6,
+            sabado: 6,
+          };
+
+          const diaRegex = /(domingo|lunes|martes|miércoles|miercoles|jueves|viernes|sábado|sabado)(?: a las)? (\d{1,2})(?::(\d{2}))?(?:\s*(am|pm|de la tarde|de la mañana))?/;
+          const diaMatch = textLower.match(diaRegex);
+          if (diaMatch) {
+            let [, dia, hour, minute, meridian] = diaMatch;
+            hour = parseInt(hour);
+            minute = minute ? parseInt(minute) : 0;
+            if (meridian?.includes("tarde") || meridian?.includes("pm")) hour += 12;
+            if (meridian?.includes("mañana") && hour === 12) hour = 0;
+
+            const targetDay = dias[dia];
+            parsedDate = new Date(now);
+            const diff = (targetDay - now.getDay() + 7) % 7 || 7;
+            parsedDate.setDate(now.getDate() + diff);
+            parsedDate.setHours(hour, minute, 0, 0);
+          }
+
+          // 🔹 3. Si escribe el formato clásico DD-MM-YYYY HH:MM
+          const dateRegex = /^(\d{2})-(\d{2})-(\d{4})[ T](\d{2}):(\d{2})$/;
+          const match = text.match(dateRegex);
+          if (!parsedDate && match) {
+            const [, day, month, year, hour, minute] = match;
+            parsedDate = new Date(`${year}-${month}-${day}T${hour}:${minute}:00`);
+          }
+
+          // 🔹 4. Validar si se logró obtener una fecha
           if (!parsedDate || isNaN(parsedDate.getTime())) {
             await sendMessage(
               from,
@@ -337,6 +366,9 @@ async function main() {
 
           return res.sendStatus(200);
         }
+
+
+
 
       }
 
