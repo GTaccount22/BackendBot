@@ -356,10 +356,10 @@ async function main() {
     });
   });
 
-  async function sendServicesMenu(to) {
+  async function sendServicesMenu(to, chatId) {
     const { data: services } = await supabase.from("services").select("*");
     if (!services || services.length === 0) {
-      await sendMessage(to, "💈 En este momento no hay servicios disponibles.");
+      await sendMessage(to, "💈 En este momento no hay servicios disponibles.", chatId);
       return;
     }
 
@@ -370,7 +370,7 @@ async function main() {
     });
     menu += "\nPor favor, responde con el número del servicio que deseas reservar 👇";
 
-    await sendMessage(to, menu);
+    await sendMessage(to, menu, chatId);
   }
 
   // 🚀 Iniciar servidor
