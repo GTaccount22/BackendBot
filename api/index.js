@@ -154,7 +154,7 @@ async function main() {
             .update({ client_id: client.id, context: "showing_services" })
             .eq("id", chat.id);
 
-          await sendServicesMenu(from);
+          await sendServicesMenu(from, chat.id);
           return res.sendStatus(200);
         }
 
