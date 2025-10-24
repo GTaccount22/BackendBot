@@ -104,42 +104,57 @@ async function main() {
           .single();
 
         if (!client) {
+          // Si el contexto NO está esperando nombre → pedirlo
           if (chat.context !== "awaiting_name") {
-            // Pedir nombre
-            await sendMessage(from, "👋 ¡Hola! Bienvenido a *Peluquería DuoStyle* 💈\nPor favor, dime tu *nombre* para continuar:", chat.id);
+            await sendMessage(
+              from,
+              "👋 ¡Hola! Bienvenido a *Peluquería DuoStyle* 💈\nPor favor, dime tu *nombre* para continuar:",
+              chat.id
+            );
             await supabase.from("chats").update({ context: "awaiting_name" }).eq("id", chat.id);
             return res.sendStatus(200);
-          } else {
-            // Guardar cliente
-            // Guardar cliente
-            const name = text.trim();
-            const { data: newClient, error: clientError } = await supabase
-              .from("clients")
-              .insert([{ name, phone: from }])
-              .select()
-              .single();
-
-            if (clientError) {
-              console.error("Error guardando cliente:", clientError);
-              return res.sendStatus(500);
-            }
-
-            client = newClient;
-
-            // Actualizar contexto
-            await supabase
-              .from("chats")
-              .update({ client_id: client.id, context: "showing_services" })
-              .eq("id", chat.id);
-
-            // Enviar menú de servicios
-            await sendServicesMenu(from, chat.id);
           }
+
+          // Si ya estaba esperando nombre → validar y guardar
+          const name = text.trim();
+          if (!name || name.length < 2) {
+            await sendMessage(from, "⚠️ Por favor, escribe tu *nombre completo* para continuar.", chat.id);
+            return res.sendStatus(200);
+          }
+
+          const { data: newClient, error: clientError } = await supabase
+            .from("clients")
+            .insert([{ name, phone: from }])
+            .select()
+            .single();
+
+          if (clientError) {
+            console.error("Error guardando cliente:", clientError);
+            return res.sendStatus(500);
+          }
+
+          client = newClient;
+
+          // Actualizar contexto y mostrar servicios
+          await supabase
+            .from("chats")
+            .update({ client_id: client.id, context: "showing_services" })
+            .eq("id", chat.id);
+
+          await sendServicesMenu(from);
+          return res.sendStatus(200);
         }
 
 
+        // Obtener nuevamente el chat actualizado
+        let { data: updatedChat } = await supabase
+          .from("chats")
+          .select("*")
+          .eq("id", chat.id)
+          .single();
+
         // Si ya existe cliente
-        const currentContext = chat.context || "showing_services";
+        const currentContext = updatedChat?.context || "showing_services";
 
         // Mostrar servicios
         if (currentContext === "showing_services") {
@@ -345,7 +360,7 @@ async function main() {
   async function sendServicesMenu(to) {
     const { data: services } = await supabase.from("services").select("*");
     if (!services || services.length === 0) {
-      await sendMessage(to, "💈 En este momento no hay servicios disponibles.", chat.id);
+      await sendMessage(to, "💈 En este momento no hay servicios disponibles.");
       return;
     }
 
